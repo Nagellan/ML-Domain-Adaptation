@@ -1,0 +1,4 @@
+.idea
+venv
+data
+mnist_inno.pt
