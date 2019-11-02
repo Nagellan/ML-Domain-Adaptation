@@ -1,13 +1,37 @@
+##
+# 1) Make better random seed: https://discuss.pytorch.org/t/random-seed-initialization/7854
+##
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
+import random
+import numpy as np
 
 TRAIN_BATCH_SIZE = 32
 TEST_BATCH_SIZE = 100
 DATA_FOLDER = "data"
+SEED = 228
+
+# Remove randomness by adding global uniform seed where needed
+# Start of code snippet (1)
+np.random.seed(SEED)
+random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
+
+
+def _init_fn():
+    np.random.seed(SEED)
+# End of code snippet (1)
 
 
 # Transformations
@@ -30,9 +54,12 @@ svhn_test = datasets.SVHN(DATA_FOLDER, download=True, split="test", transform=te
 mnist_test = datasets.MNIST(DATA_FOLDER, download=True, train=False, transform=test_data_transformations)
 
 # Data loaders
-train_svhn_loader = DataLoader(svhn_train, batch_size=TRAIN_BATCH_SIZE, shuffle=True)
-test_svhn_loader = DataLoader(svhn_test, batch_size=TEST_BATCH_SIZE, shuffle=True)
-test_mnist_loader = DataLoader(mnist_test, batch_size=TEST_BATCH_SIZE, shuffle=True)
+train_svhn_loader = DataLoader(svhn_train, batch_size=TRAIN_BATCH_SIZE, shuffle=True,
+                               num_workers=0, worker_init_fn=_init_fn)
+test_svhn_loader = DataLoader(svhn_test, batch_size=TEST_BATCH_SIZE, shuffle=True,
+                              num_workers=0, worker_init_fn=_init_fn)
+test_mnist_loader = DataLoader(mnist_test, batch_size=TEST_BATCH_SIZE, shuffle=True,
+                               num_workers=0, worker_init_fn=_init_fn)
 
 
 class Net(nn.Module):
@@ -93,7 +120,7 @@ def test(model, device, test_loader):
         100. * correct / len(test_loader.dataset)))
 
 
-epochs = 10
+epochs = 3
 lr = 0.01
 momentum = 0.5
 log_interval = 700
