@@ -10,11 +10,13 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import random
 import numpy as np
+import matplotlib.pyplot as plt
 
 TRAIN_BATCH_SIZE = 32
 TEST_BATCH_SIZE = 100
 DATA_FOLDER = "data"
 SEED = 228
+PRINT_LOGS = True
 
 # Remove randomness by adding global uniform seed where needed
 # Start of code snippet (1)
@@ -35,23 +37,23 @@ def _init_fn():
 
 
 # Transformations
-train_data_transformations = transforms.Compose([
+svhn_transformations = transforms.Compose([
     transforms.Resize(28),
     transforms.Grayscale(),
     transforms.ToTensor(),
     transforms.Normalize((0.1307,), (0.3081,))
 ])
 
-test_data_transformations = transforms.Compose([
+mnist_transformations = transforms.Compose([
     transforms.ToTensor(),
     # transforms.ColorJitter(brightness=0, contrast=0,
     transforms.Normalize((0.1307,), (0.3081,))
 ])
 
 # Data Source
-svhn_train = datasets.SVHN(DATA_FOLDER, download=True, split="train", transform=train_data_transformations)
-svhn_test = datasets.SVHN(DATA_FOLDER, download=True, split="test", transform=test_data_transformations)
-mnist_test = datasets.MNIST(DATA_FOLDER, download=True, train=False, transform=test_data_transformations)
+svhn_train = datasets.SVHN(DATA_FOLDER, download=True, split="train", transform=svhn_transformations)
+svhn_test = datasets.SVHN(DATA_FOLDER, download=True, split="test", transform=svhn_transformations)
+mnist_test = datasets.MNIST(DATA_FOLDER, download=True, train=False, transform=mnist_transformations)
 
 # Data loaders
 train_svhn_loader = DataLoader(svhn_train, batch_size=TRAIN_BATCH_SIZE, shuffle=True,
@@ -67,6 +69,7 @@ class Net(nn.Module):
         super(Net, self).__init__()
         self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        # self.conv2_bn = nn.BatchNorm2d(20)  # added Batch Norm
         self.conv2_drop = nn.Dropout2d()
         self.fc1 = nn.Linear(320, 50)
         self.fc2 = nn.Linear(50, 10)
@@ -96,12 +99,13 @@ def train(model, device, train_loader, optimizer, epoch):
         loss.backward()
         optimizer.step()
         if batch_idx % log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                       100. * batch_idx / len(train_loader), loss.item()))
+            if PRINT_LOGS:
+                print('Train Epoch: {} [{:05d}/{:05d} ({:02.0f}%)]\tLoss: {:.6f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                           100. * batch_idx / len(train_loader), loss.item()))
 
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, set_name):
     model.eval()
     test_loss = 0
     correct = 0
@@ -114,22 +118,68 @@ def test(model, device, test_loader):
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
+    accuracy = 100. * correct / len(test_loader.dataset)
 
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    if PRINT_LOGS:
+        print('{}: Average loss: {:.4f}, Accuracy: {:05d}/{:05d} ({:.2f}%)'.format(
+            set_name, test_loss, correct, len(test_loader.dataset), accuracy))
+
+    return round(accuracy, 3)
 
 
-epochs = 3
-lr = 0.01
+epochs = 10
+lr = 0.005
 momentum = 0.5
 log_interval = 700
 
 model = model_cnn
 optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+# optimizer = optim.ASGD(model.parameters(), lr=lr)
 
-for epoch in range(1, epochs + 1):
+epoch_list = list(range(1, epochs + 1))
+svhn_train_accuracy = []
+svhn_test_accuracy = []
+mnist_accuracy = []
+
+for epoch in epoch_list:
     train(model, device, train_svhn_loader, optimizer, epoch)
-    test(model, device, test_mnist_loader)
-
+    svhn_train_accuracy.append(test(model, device, train_svhn_loader, "SVHN Train set"))
+    svhn_test_accuracy.append(test(model, device, test_svhn_loader, "SVHN Test  set"))
+    mnist_accuracy.append(test(model, device, test_mnist_loader, "MNIST Test set"))
+    if PRINT_LOGS:
+        print()
     torch.save(model.state_dict(), "mnist_inno.pt")
+
+if PRINT_LOGS:
+    x = np.arange(len(epoch_list))  # the label locations
+    width = 0.23  # the width of the bars
+    fig, ax = plt.subplots()
+    rects1 = ax.bar(x - width, svhn_train_accuracy, width, label="SVHN Train")
+    rects2 = ax.bar(x, svhn_test_accuracy, width, label="SVHN Test")
+    rects3 = ax.bar(x + width, mnist_accuracy, width, label="MNIST")
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    ax.set_ylabel("Accuracy")
+    ax.set_xlabel("Epochs")
+    ax.set_title("SVHN and MNIST sets accuracy over multiple epochs")
+    ax.set_xticks(x)
+    ax.set_xticklabels(epoch_list)
+    ax.legend()
+
+    def autolabel(rects):
+        """Attach a text label above each bar in *rects*, displaying its height."""
+        for rect in rects:
+            height = rect.get_height()
+            ax.annotate('{}'.format(height),
+                        xy=(rect.get_x() + rect.get_width() / 2, height),
+                        xytext=(0, 3),  # 3 points vertical offset
+                        textcoords="offset points",
+                        ha='center', va='bottom')
+
+    autolabel(rects1)
+    autolabel(rects2)
+    autolabel(rects3)
+    fig.tight_layout()
+    plt.margins(y=0.1)
+    plt.show()
+
+print(mnist_accuracy[-1])
